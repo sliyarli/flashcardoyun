@@ -18,7 +18,7 @@ except Exception:
         pass
 
 # BURAYA RENDER-DƏN ALDIĞINIZ LİNKİ YAZIN
-SERVER_URL = "https://sizin-render-linkiniz.onrender.com" 
+SERVER_URL = "https://flashcardoyun.onrender.com" 
 
 class TTSManager:
     def __init__(self):

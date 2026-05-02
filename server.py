@@ -1,11 +1,11 @@
-# server.py
-from flask import Flask
+from flask import Flask, request
 from flask_socketio import SocketIO, emit
 import csv
 import random
+import glob
+import os
 
 app = Flask(__name__)
-# Bütün fərqli İP-lərdən gələn qoşulmalara icazə veririk
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 players = {}
@@ -13,13 +13,18 @@ flashcards = []
 current_question = None
 answers_received = 0
 
-# CSV faylını oxuyan funksiya
 def load_csv():
     global flashcards
+    # Qovluqdakı istənilən CSV faylını avtomatik tapır
+    csv_files = glob.glob("*.csv")
+    if not csv_files:
+        print("CSV faylı tapılmadı!")
+        return
+        
     try:
-        with open('words.csv', 'r', encoding='utf-8-sig') as f:
+        with open(csv_files[0], 'r', encoding='utf-8-sig') as f:
             reader = csv.reader(f)
-            next(reader) # Başlığı atla
+            next(reader, None) # Başlığı atla
             flashcards = [row[:2] for row in reader if len(row) >= 2]
     except Exception as e:
         print(f"CSV Error: {e}")
@@ -28,18 +33,16 @@ load_csv()
 
 def generate_question():
     if not flashcards:
-        return None
+        return {"word": "CSV Xətası", "options": ["A", "B", "C", "D"], "correct": "A"}
     
-    # Doğru cavabı seçirik
     correct_card = random.choice(flashcards)
     word = correct_card[0]
     correct_translation = correct_card[1]
     
-    # 3 dənə fərqli yalnış cavab seçirik
     wrong_options = [card[1] for card in flashcards if card[1] != correct_translation]
+    wrong_options = list(set(wrong_options)) # Eyni sözlərin təkrarlanmasının qarşısını alır
     wrong_options = random.sample(wrong_options, min(3, len(wrong_options)))
     
-    # Bütün variantları birləşdirib qarışdırırıq
     options = wrong_options + [correct_translation]
     random.shuffle(options)
     
@@ -55,10 +58,8 @@ def handle_connect():
     player_id = request.sid
     if len(players) < 2:
         players[player_id] = {"score": 0, "last_answer": None, "ready_for_next": False}
-        print(f"Oyunçu qoşuldu: {player_id}")
         emit('system_message', "Serverə qoşuldunuz. Digər oyunçu gözlənilir...", room=player_id)
         
-        # Əgər iki nəfər olduqsa oyunu başlat
         if len(players) == 2:
             socketio.emit('system_message', "Oyunçu 2 qoşuldu! Oyun başlayır...")
             if not current_question:
@@ -72,7 +73,6 @@ def handle_disconnect():
     player_id = request.sid
     if player_id in players:
         del players[player_id]
-        print(f"Oyunçu ayrıldı: {player_id}")
         socketio.emit('system_message', "Digər oyunçu serverdən ayrıldı.")
 
 @socketio.on('submit_answer')
@@ -84,10 +84,8 @@ def handle_answer(data):
         players[player_id]["last_answer"] = data["answer"]
         answers_received += 1
         
-        # Hər kəsə kimin cavab verdiyini bildiririk (cavabın özünü yox)
         socketio.emit('player_answered', {"player": "Oyunçu"})
         
-        # Əgər hər ikisi cavab verdisə, nəticəni hesabla və göndər
         if answers_received == 2:
             results = []
             for pid, p_data in players.items():
@@ -115,9 +113,7 @@ def handle_next():
         players[player_id]["ready_for_next"] = True
         socketio.emit('player_ready', {"player": "Oyunçu"})
         
-        # Əgər hər ikisi Next basdısa
         if all(p["ready_for_next"] for p in players.values()):
-            # Yeni sual üçün reset
             answers_received = 0
             for p in players.values():
                 p["last_answer"] = None
@@ -127,8 +123,5 @@ def handle_next():
             socketio.emit('new_question', {"word": current_question["word"], "options": current_question["options"]})
 
 if __name__ == '__main__':
-    from flask import request
-    # Render avtomatik olaraq PORT adlı mühit dəyişəni təyin edir
-    import os
     port = int(os.environ.get('PORT', 5000))
     socketio.run(app, host='0.0.0.0', port=port)
