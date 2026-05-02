@@ -16,15 +16,17 @@ def send_next_question():
     global current_index, current_question, flashcards
     
     if current_index >= len(flashcards):
-        socketio.emit('system_message', "Bütün sözlər bitdi! Təbriklər!")
-        socketio.emit('game_over')
+        # OYUN BİTDİ - LEADERBOARD HAZIRLA
+        sorted_players = sorted(players.values(), key=lambda x: x["score"], reverse=True)
+        leaderboard = [{"username": p["username"], "score": p["score"]} for p in sorted_players]
+        
+        socketio.emit('game_over', {"leaderboard": leaderboard})
         return
         
     correct_card = flashcards[current_index]
     word = correct_card[0]
     correct_translation = correct_card[1]
     
-    # Bütün fərqli tərcümələri tap və 3 yalnış variant seç
     all_translations = list(set([c[1] for c in flashcards if c[1] != correct_translation]))
     wrong_options = random.sample(all_translations, min(3, len(all_translations)))
     
@@ -44,25 +46,17 @@ def send_next_question():
         "total": len(flashcards)
     })
 
-@socketio.on('connect')
-def handle_connect():
+@socketio.on('join_game')
+def handle_join(data):
     player_id = request.sid
+    username = data.get('username', 'Anonim')
+    
     if len(players) < 2:
-        players[player_id] = {"score": 0, "last_answer": None, "ready_for_next": False}
-        emit('system_message', "Serverə qoşuldunuz. Digər oyunçu gözlənilir...", room=player_id)
+        players[player_id] = {"username": username, "score": 0, "last_answer": None, "ready_for_next": False}
+        emit('system_message', f"Xoş gəldin, {username}! Digər oyunçu gözlənilir...", room=player_id)
         
         if len(players) == 2:
-            if not flashcards:
-                socketio.emit('system_message', "İki oyunçu da hazırdır! Xahiş olunur biriniz CSV faylını yükləyin.")
-            else:
-                # Kimsə sonradan düşüb təzədən qoşulsa, qaldığı yerdən davam edir
-                if current_question:
-                    emit('new_question', {
-                        "word": current_question["word"], 
-                        "options": current_question["options"],
-                        "current": current_index + 1,
-                        "total": len(flashcards)
-                    }, room=player_id)
+            socketio.emit('system_message', "Hər iki oyunçu hazırdır! Xahiş olunur biriniz CSV faylını yükləyin.")
     else:
         emit('system_message', "Server doludur.", room=player_id)
 
@@ -71,7 +65,7 @@ def handle_disconnect():
     player_id = request.sid
     if player_id in players:
         del players[player_id]
-        socketio.emit('system_message', "Digər oyunçu ayrıldı. Gözlənilir...")
+        socketio.emit('system_message', "Digər oyunçu ayrıldı.")
 
 @socketio.on('upload_words')
 def handle_upload(data):
@@ -81,7 +75,7 @@ def handle_upload(data):
         return
         
     flashcards = data['words']
-    random.shuffle(flashcards) # Yüklənən kimi sözləri qarışdırırıq
+    random.shuffle(flashcards)
     current_index = 0
     answers_received = 0
     
@@ -106,12 +100,28 @@ def handle_answer(data):
         
         if answers_received == 2:
             results = []
+            correct_users = []
+            
             for pid, p_data in players.items():
                 is_correct = (p_data["last_answer"] == current_question["correct"])
-                if is_correct: p_data["score"] += 1
+                if is_correct: 
+                    p_data["score"] += 1
+                    correct_users.append(p_data["username"])
+                    
                 results.append({"id": pid, "is_correct": is_correct})
             
-            socketio.emit('show_result', {"correct_answer": current_question["correct"]})
+            # KİMİN DÜZ TAPDIĞINI MÜƏYYƏN EDİRİK
+            if len(correct_users) == 2:
+                result_msg = "Möhtəşəm! Hər ikiniz düzgün cavab verdiniz! 🎉"
+            elif len(correct_users) == 1:
+                result_msg = f"{correct_users[0]} düzgün cavab verdi! ✅"
+            else:
+                result_msg = "Təəssüf ki, heç kim düz tapmadı! ❌"
+                
+            socketio.emit('show_result', {
+                "correct_answer": current_question["correct"],
+                "result_msg": result_msg
+            })
 
 @socketio.on('request_next')
 def handle_next():
