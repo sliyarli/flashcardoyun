@@ -9,6 +9,7 @@ import re
 import csv
 import ctypes
 
+# Windows Şüşələnmə həlli
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
 except Exception:
@@ -53,6 +54,7 @@ class MultiplayerFlashcardApp:
         self.selected_answer = None
         self.has_answered = False
         self.interaction_allowed = False
+        self.answers_count = 0
         
         self.colors = {
             'bg': '#1E1E1E',
@@ -69,45 +71,40 @@ class MultiplayerFlashcardApp:
             'silver': '#C0C0C0'
         }
 
-        # Əsas konteyner - Səhifələri dəyişmək üçün
         self.main_container = tk.Frame(self.root, bg=self.colors['bg'])
         self.main_container.pack(expand=True, fill=tk.BOTH)
 
         self.setup_sockets()
         self.setup_login_ui()
 
-    # --- SƏHİFƏLƏR ---
-    
     def clear_container(self):
         for widget in self.main_container.winfo_children():
             widget.destroy()
 
     def setup_login_ui(self):
         self.clear_container()
-        
         login_frame = tk.Frame(self.main_container, bg=self.colors['bg'])
         login_frame.pack(expand=True)
         
         tk.Label(login_frame, text="Oyuna Xoş Gəldiniz!", font=("Segoe UI", 32, "bold"), bg=self.colors['bg'], fg=self.colors['accent']).pack(pady=20)
-        tk.Label(login_frame, text="İstifadəçi adınızı təyin edin:", font=("Segoe UI", 16), bg=self.colors['bg'], fg=self.colors['text']).pack(pady=10)
+        tk.Label(login_frame, text="İstifadəçi adınızı yazın:", font=("Segoe UI", 16), bg=self.colors['bg'], fg=self.colors['text']).pack(pady=10)
         
         self.username_entry = tk.Entry(login_frame, font=("Segoe UI", 20), justify='center', width=15)
         self.username_entry.pack(pady=10)
         self.username_entry.focus()
         
-        btn = tk.Button(login_frame, text="Oyuna Qoşul", command=self.start_connection, font=("Segoe UI", 16, "bold"), bg=self.colors['accent'], fg="white", relief=tk.FLAT, padx=20)
+        btn = tk.Button(login_frame, text="Daxil Ol", command=self.start_connection, font=("Segoe UI", 16, "bold"), bg=self.colors['accent'], fg="white", relief=tk.FLAT, padx=20)
         btn.pack(pady=30)
 
     def setup_game_ui(self):
         self.clear_container()
-        
         top_frame = tk.Frame(self.main_container, bg=self.colors['bg'])
         top_frame.pack(fill=tk.X, pady=10, padx=20)
         
         self.load_btn = tk.Button(top_frame, text="📁 CSV Yüklə", command=self.load_csv_and_send, bg=self.colors['btn_bg'], fg=self.colors['btn_fg'], relief=tk.FLAT, font=("Segoe UI", 10, "bold"))
         self.load_btn.pack(side=tk.LEFT, padx=10)
         
-        self.status_label = tk.Label(top_frame, text="Serverə qoşulur...", fg=self.colors['wait'], bg=self.colors['bg'], font=("Segoe UI", 12, "bold"))
+        self.status_label = tk.Label(top_frame, text="Qoşulur...", fg=self.colors['wait'], bg=self.colors['bg'], font=("Segoe UI", 12, "bold"))
         self.status_label.pack(side=tk.LEFT, padx=20)
         
         self.speak_btn = tk.Button(top_frame, text="🔊 Səsləndir", command=self.speak_word, bg=self.colors['btn_bg'], fg=self.colors['btn_fg'], relief=tk.FLAT, font=("Segoe UI", 10, "bold"))
@@ -116,7 +113,7 @@ class MultiplayerFlashcardApp:
         self.card_frame = tk.Frame(self.main_container, bg=self.colors['card_bg'], bd=0)
         self.card_frame.pack(expand=True, fill=tk.BOTH, padx=40, pady=10)
         
-        self.word_label = tk.Label(self.card_frame, text="Məlumat Gözlənilir...", font=("Segoe UI", 48, "bold"), bg=self.colors['card_bg'], fg=self.colors['text'], wraplength=1500)
+        self.word_label = tk.Label(self.card_frame, text="Gözləyin...", font=("Segoe UI", 48, "bold"), bg=self.colors['card_bg'], fg=self.colors['text'], wraplength=1500)
         self.word_label.pack(expand=True)
         
         self.progress_label = tk.Label(self.card_frame, text="0 / 0", font=("Segoe UI", 14, "bold"), bg=self.colors['card_bg'], fg=self.colors['progress'])
@@ -137,37 +134,43 @@ class MultiplayerFlashcardApp:
 
     def show_leaderboard(self, leaderboard):
         self.clear_container()
-        
         board_frame = tk.Frame(self.main_container, bg=self.colors['bg'])
         board_frame.pack(expand=True)
         
-        tk.Label(board_frame, text="Oyun Bitdi! Liderlər Lövhəsi", font=("Segoe UI", 36, "bold"), bg=self.colors['bg'], fg=self.colors['text']).pack(pady=40)
+        # Bərabərlik yoxlanışı
+        is_tie = len(leaderboard) == 2 and leaderboard[0]['score'] == leaderboard[1]['score']
+        
+        title_text = "Bərabərə!" if is_tie else "Oyun Bitdi! Nəticələr"
+        title_color = self.colors['gold'] if is_tie else self.colors['text']
+
+        tk.Label(board_frame, text=title_text, font=("Segoe UI", 42, "bold"), bg=self.colors['bg'], fg=title_color).pack(pady=40)
         
         for i, player in enumerate(leaderboard):
-            # Əgər ballar bərabərdirsə, ikisi də birinci yer sayılır (TIE)
-            if i > 0 and player['score'] == leaderboard[0]['score']:
+            if is_tie:
                 color = self.colors['gold']
                 medal = "👑"
                 place = 1
             else:
-                color = self.colors['gold'] if i == 0 else self.colors['silver']
-                medal = "👑" if i == 0 else "🥈"
-                place = i + 1
+                if i == 0:
+                    color = self.colors['gold']
+                    medal = "👑"
+                    place = 1
+                else:
+                    color = self.colors['silver']
+                    medal = "🥈"
+                    place = 2
                 
             text = f"{place}. {medal} {player['username']}  -  {player['score']} bal"
-            tk.Label(board_frame, text=text, font=("Segoe UI", 28, "bold"), bg=self.colors['bg'], fg=color).pack(pady=15)
+            tk.Label(board_frame, text=text, font=("Segoe UI", 30, "bold"), bg=self.colors['bg'], fg=color).pack(pady=15)
             
-        btn = tk.Button(board_frame, text="Yeni Oyuna Başla (Çıxış)", command=self.root.destroy, font=("Segoe UI", 16, "bold"), bg=self.colors['btn_bg'], fg="white", relief=tk.FLAT, padx=20)
+        btn = tk.Button(board_frame, text="Oyundan Çıx", command=self.root.destroy, font=("Segoe UI", 16, "bold"), bg=self.colors['btn_bg'], fg="white", relief=tk.FLAT, padx=20)
         btn.pack(pady=50)
-
-    # --- MƏNTİQ VƏ SOKETLƏR ---
 
     def start_connection(self):
         self.username = self.username_entry.get().strip()
         if not self.username:
-            messagebox.showwarning("Xəta", "Adınızı yazmadan oyuna daxil ola bilməzsiniz!")
+            messagebox.showwarning("Xəta", "Zəhmət olmasa istifadəçi adınızı yazın!")
             return
-            
         self.setup_game_ui()
         threading.Thread(target=self.connect_to_server, daemon=True).start()
 
@@ -195,20 +198,19 @@ class MultiplayerFlashcardApp:
             self.options = data['options']
             self.has_answered = False
             self.interaction_allowed = True
+            self.answers_count = 0
             self.selected_answer = None
-            
-            # UI dəyişikliklərini əsas axında etmək
             self.root.after(0, lambda: self._update_ui_for_new_question(data))
 
         @self.sio.on('player_answered')
         def on_player_answered(data):
-            count = data['count']
-            if count == 1:
+            self.answers_count = data['count']
+            if self.answers_count == 1:
                 if not self.has_answered:
                     self.update_status("Dostunuz cavab verdi! Sizin seçiminiz gözlənilir...", self.colors['wait'])
-            elif count == 2:
+            elif self.answers_count == 2:
                 if self.has_answered:
-                    self.update_status("Dostunuz da cavabını verdi! Nəticələr gəlir...", self.colors['wait'])
+                    self.update_status("Hər kəs cavab verdi! Nəticələr gəlir...", self.colors['wait'])
 
         @self.sio.on('show_result')
         def on_result(data):
@@ -224,31 +226,24 @@ class MultiplayerFlashcardApp:
             leaderboard = data['leaderboard']
             self.root.after(0, lambda: self.show_leaderboard(leaderboard))
 
-    # UI Güncəlləmələri (Thread-safe)
     def _update_ui_for_new_question(self, data):
         self.word_label.config(text=self.current_word, fg=self.colors['text'])
         self.progress_label.config(text=f"{data['current']} / {data['total']}")
         self.next_btn.config(state=tk.DISABLED, bg=self.colors['btn_bg'], fg="#888888")
         self.update_status("Sual gəldi! Seçiminizi edin.", self.colors['text'])
-        
         for i, btn in enumerate(self.option_buttons):
             btn.config(text=self.options[i], bg=self.colors['btn_bg'], fg=self.colors['text'])
-        
         self.speak_word()
 
     def _update_ui_for_result(self, data):
         correct_ans = data['correct_answer']
         result_msg = data['result_msg']
-        
-        # Kimin tapdığını yuxarıda göstər
         self.update_status(result_msg, self.colors['accent'])
-        
         for btn in self.option_buttons:
             if btn.cget('text') == correct_ans:
                 btn.config(bg=self.colors['accent'])
             elif btn.cget('text') == self.selected_answer and self.selected_answer != correct_ans:
                 btn.config(bg=self.colors['wrong'])
-
         self.next_btn.config(state=tk.NORMAL, bg=self.colors['accent'], fg="white")
 
     def load_csv_and_send(self):
@@ -259,15 +254,13 @@ class MultiplayerFlashcardApp:
                 reader = csv.reader(f)
                 next(reader, None)
                 words_list = [row[:2] for row in reader if len(row) >= 2]
-            
             if len(words_list) < 4:
-                messagebox.showerror("Xəta", "CSV faylında ən azı 4 söz olmalıdır.")
+                messagebox.showerror("Xəta", "Faylda ən azı 4 söz olmalıdır.")
                 return
-                
-            self.update_status("Sözlər serverə göndərilir...", self.colors['wait'])
+            self.update_status("Yüklənir...", self.colors['wait'])
             self.sio.emit('upload_words', {'words': words_list})
         except Exception as e:
-            messagebox.showerror("Xəta", f"Fayl oxunarkən xəta: {e}")
+            messagebox.showerror("Xəta", f"Xəta: {e}")
 
     def update_status(self, text, color):
         if hasattr(self, 'status_label') and self.status_label.winfo_exists():
@@ -279,12 +272,12 @@ class MultiplayerFlashcardApp:
         self.has_answered = True
         self.selected_answer = self.options[idx]
         btn.config(bg=self.colors['selected'])
-        self.update_status("Cavabınız qeydə alındı. Dostunuzun cavabı gözlənilir...", self.colors['wait'])
+        self.update_status("Seçiminiz qeydə alındı. Gözləyin...", self.colors['wait'])
         self.sio.emit('submit_answer', {"answer": self.selected_answer})
 
     def request_next(self):
         self.next_btn.config(state=tk.DISABLED, bg=self.colors['btn_bg'], fg="#888888")
-        self.update_status("Növbəti sual üçün müraciət edildi. Dostunuz gözlənilir...", self.colors['wait'])
+        self.update_status("Növbəti sual gözlənilir...", self.colors['wait'])
         self.sio.emit('request_next')
 
     def speak_word(self):
