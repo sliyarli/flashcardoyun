@@ -9,7 +9,7 @@ import re
 import csv
 import ctypes
 
-# Windows Şüşələnmə həlli
+# Windows Şüşələnmə (DPI) həlli
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
 except Exception:
@@ -18,7 +18,7 @@ except Exception:
     except Exception:
         pass
 
-# BURAYA RENDER-DƏN ALDIĞINIZ LİNKİ YAZIN
+# SERVER LİNKİ
 SERVER_URL = "https://flashcardoyun.onrender.com" 
 
 class TTSManager:
@@ -45,6 +45,9 @@ class MultiplayerFlashcardApp:
         self.root.title("Çoxoyunçulu Söz Kartları")
         self.root.geometry("1000x750")
         
+        # Pəncərəni bağlayanda soruşsun
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
         self.tts = TTSManager()
         self.sio = socketio.Client()
         
@@ -54,7 +57,6 @@ class MultiplayerFlashcardApp:
         self.selected_answer = None
         self.has_answered = False
         self.interaction_allowed = False
-        self.answers_count = 0
         
         self.colors = {
             'bg': '#1E1E1E',
@@ -77,9 +79,19 @@ class MultiplayerFlashcardApp:
         self.setup_sockets()
         self.setup_login_ui()
 
+    def on_closing(self):
+        if messagebox.askyesno("Çıxış", "emin miyiz?"):
+            try:
+                self.sio.disconnect()
+            except:
+                pass
+            self.root.destroy()
+
     def clear_container(self):
         for widget in self.main_container.winfo_children():
             widget.destroy()
+
+    # --- SƏHİFƏLƏR ---
 
     def setup_login_ui(self):
         self.clear_container()
@@ -101,6 +113,7 @@ class MultiplayerFlashcardApp:
         top_frame = tk.Frame(self.main_container, bg=self.colors['bg'])
         top_frame.pack(fill=tk.X, pady=10, padx=20)
         
+        # CSV Yüklə düyməsi
         self.load_btn = tk.Button(top_frame, text="📁 CSV Yüklə", command=self.load_csv_and_send, bg=self.colors['btn_bg'], fg=self.colors['btn_fg'], relief=tk.FLAT, font=("Segoe UI", 10, "bold"))
         self.load_btn.pack(side=tk.LEFT, padx=10)
         
@@ -113,7 +126,7 @@ class MultiplayerFlashcardApp:
         self.card_frame = tk.Frame(self.main_container, bg=self.colors['card_bg'], bd=0)
         self.card_frame.pack(expand=True, fill=tk.BOTH, padx=40, pady=10)
         
-        self.word_label = tk.Label(self.card_frame, text="Gözləyin...", font=("Segoe UI", 48, "bold"), bg=self.colors['card_bg'], fg=self.colors['text'], wraplength=1500)
+        self.word_label = tk.Label(self.card_frame, text="Giriş edildi...", font=("Segoe UI", 48, "bold"), bg=self.colors['card_bg'], fg=self.colors['text'], wraplength=1500)
         self.word_label.pack(expand=True)
         
         self.progress_label = tk.Label(self.card_frame, text="0 / 0", font=("Segoe UI", 14, "bold"), bg=self.colors['card_bg'], fg=self.colors['progress'])
@@ -137,9 +150,7 @@ class MultiplayerFlashcardApp:
         board_frame = tk.Frame(self.main_container, bg=self.colors['bg'])
         board_frame.pack(expand=True)
         
-        # Bərabərlik yoxlanışı
         is_tie = len(leaderboard) == 2 and leaderboard[0]['score'] == leaderboard[1]['score']
-        
         title_text = "Bərabərə!" if is_tie else "Oyun Bitdi! Nəticələr"
         title_color = self.colors['gold'] if is_tie else self.colors['text']
 
@@ -163,13 +174,34 @@ class MultiplayerFlashcardApp:
             text = f"{place}. {medal} {player['username']}  -  {player['score']} bal"
             tk.Label(board_frame, text=text, font=("Segoe UI", 30, "bold"), bg=self.colors['bg'], fg=color).pack(pady=15)
             
-        btn = tk.Button(board_frame, text="Oyundan Çıx", command=self.root.destroy, font=("Segoe UI", 16, "bold"), bg=self.colors['btn_bg'], fg="white", relief=tk.FLAT, padx=20)
+        btn = tk.Button(board_frame, text="Oyundan Çıx", command=self.on_closing, font=("Segoe UI", 16, "bold"), bg=self.colors['btn_bg'], fg="white", relief=tk.FLAT, padx=20)
         btn.pack(pady=50)
+
+    # --- MƏNTİQ ---
+
+    def load_csv_and_send(self):
+        filepath = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        if not filepath: return
+        try:
+            with open(filepath, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                next(reader, None)
+                words_list = [row[:2] for row in reader if len(row) >= 2]
+            if len(words_list) < 4:
+                messagebox.showerror("Xəta", "Faylda ən azı 4 söz olmalıdır.")
+                return
+            
+            # SÖZLƏRİ GÖNDƏR VƏ DÜYMƏNİ YOXA ÇIXART
+            self.sio.emit('upload_words', {'words': words_list})
+            self.load_btn.pack_forget() # Düyməni gizlədir
+            
+        except Exception as e:
+            messagebox.showerror("Xəta", f"Xəta: {e}")
 
     def start_connection(self):
         self.username = self.username_entry.get().strip()
         if not self.username:
-            messagebox.showwarning("Xəta", "Zəhmət olmasa istifadəçi adınızı yazın!")
+            messagebox.showwarning("Xəta", "Zəhmət olmasa adınızı daxil edin!")
             return
         self.setup_game_ui()
         threading.Thread(target=self.connect_to_server, daemon=True).start()
@@ -198,17 +230,21 @@ class MultiplayerFlashcardApp:
             self.options = data['options']
             self.has_answered = False
             self.interaction_allowed = True
-            self.answers_count = 0
             self.selected_answer = None
+            
+            # Sual gələn kimi yükləmə düyməsini bir daha gizlədiyimizdən əmin oluruq
+            if hasattr(self, 'load_btn'):
+                self.load_btn.pack_forget()
+
             self.root.after(0, lambda: self._update_ui_for_new_question(data))
 
         @self.sio.on('player_answered')
         def on_player_answered(data):
-            self.answers_count = data['count']
-            if self.answers_count == 1:
+            count = data['count']
+            if count == 1:
                 if not self.has_answered:
                     self.update_status("Dostunuz cavab verdi! Sizin seçiminiz gözlənilir...", self.colors['wait'])
-            elif self.answers_count == 2:
+            elif count == 2:
                 if self.has_answered:
                     self.update_status("Hər kəs cavab verdi! Nəticələr gəlir...", self.colors['wait'])
 
@@ -245,22 +281,6 @@ class MultiplayerFlashcardApp:
             elif btn.cget('text') == self.selected_answer and self.selected_answer != correct_ans:
                 btn.config(bg=self.colors['wrong'])
         self.next_btn.config(state=tk.NORMAL, bg=self.colors['accent'], fg="white")
-
-    def load_csv_and_send(self):
-        filepath = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
-        if not filepath: return
-        try:
-            with open(filepath, 'r', encoding='utf-8-sig') as f:
-                reader = csv.reader(f)
-                next(reader, None)
-                words_list = [row[:2] for row in reader if len(row) >= 2]
-            if len(words_list) < 4:
-                messagebox.showerror("Xəta", "Faylda ən azı 4 söz olmalıdır.")
-                return
-            self.update_status("Yüklənir...", self.colors['wait'])
-            self.sio.emit('upload_words', {'words': words_list})
-        except Exception as e:
-            messagebox.showerror("Xəta", f"Xəta: {e}")
 
     def update_status(self, text, color):
         if hasattr(self, 'status_label') and self.status_label.winfo_exists():
